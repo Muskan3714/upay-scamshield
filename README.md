@@ -2,8 +2,9 @@
 
 **AI DEV FEST 2026 AI Hackathon (DIU CPC x upay), Track 01: Trust and Risk Intelligence**
 
-**Live demo:** `<PASTE YOUR STREAMLIT URL HERE>`
-**Team:** `<Team name>`: `<Member 1>`, `<Member 2>`, `<Member 3>`
+**Live demo:** `<https://upay-scamshield.streamlit.app>`
+**Team:** `<M4LW4R3HYDR4S>`: `<Shobnom Sultana Muskan>`, `<Parvez Hossen Badal>`, `<Hakeemul Adnan Rafi>`
+**University:** `<University of Information Technology and Sciences>`
 
 ---
 
@@ -78,7 +79,7 @@ No external AI API or paid service is used.
 ## 5. Installation and setup
 
 ```bash
-git clone <YOUR_REPO_URL>
+git clone <https://github.com/YodirHydra/upay-scamshield>
 cd upay-scamshield
 python -m venv .venv
 # Windows: .venv\Scripts\activate     macOS/Linux: source .venv/bin/activate
@@ -110,7 +111,7 @@ The trained models and data are committed, so `streamlit run app.py` works strai
 
 ## 8. Live deployment URL
 
-`<PASTE URL HERE>`
+`<https://upay-scamshield.streamlit.app>`
 
 ## 9. Testing instructions
 
