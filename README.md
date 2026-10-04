@@ -2,9 +2,9 @@
 
 **AI DEV FEST 2026 AI Hackathon (DIU CPC x upay), Track 01: Trust and Risk Intelligence**
 
-**Live demo:** `<https://upay-scamshield.streamlit.app>`
-**Team:** `<M4LW4R3HYDR4S>`: `<Shobnom Sultana Muskan>`, `<Parvez Hossen Badal>`, `<Hakeemul Adnan Rafi>`
-**University:** `<University of Information Technology and Sciences>`
+**Live demo:** https://upay-scamshield.streamlit.app
+**Team:** M4LW4R3HYDR4S: Shobnom Sultana Muskan, Parvez Hossen Badal, Hakeemul Adnan Rafee
+**University:** University of Information Technology and Sciences (UITS)
 
 ---
 
@@ -44,13 +44,13 @@ The system never blocks money permanently on its own. High-impact cases go to a 
 - **Money-mule network discovery:** graph analysis (NetworkX) finds wallets receiving high-risk money from many unrelated senders and groups them into rings by their shared collector.
 - **Explainable warnings:** SHAP values (XGBoost `pred_contribs`) turned into plain-language reasons in Bangla and English.
 - **Business rules kept separate from ML** (`risk_engine.py`).
-- **📤 Dataset B · your data:** load any CSV in the format below (in the app, or `python workspace.py your_log.csv`). ScamShield checks the data, learns every customer's habits, fits a new anomaly model on it and, if it has fraud labels, trains a new classifier on the earlier 70% and tests it on the later 30%, comparing it with the demo model and a simple rule. Everything is saved in `workspaces/B/`, and the whole app and the API can then run on it. IDs are kept as text, so phone-style wallet numbers like 01712345678 keep their leading zero.
+- **Dataset B · your data:** load any CSV in the format below (in the app, or `python workspace.py your_log.csv`). ScamShield checks the data, learns every customer's habits, fits a new anomaly model on it and, if it has fraud labels, trains a new classifier on the earlier 70% and tests it on the later 30%, comparing it with the demo model and a simple rule. In the app, each browser session gets its own private Dataset B (`workspaces/B_<session>/`); from the command line it is saved in `workspaces/B/`. The whole app and the API can then run on it. IDs are kept as text, so phone-style wallet numbers like 01712345678 keep their leading zero.
 - **Live customer mode:** pick a real customer from the log and try a new transfer; it is scored live from their real history using the same code as the API.
 - **Real-time scoring API:** `POST /score` returns the decision, scores, engine results and Bangla/English reasons.
 - **Case management:** escalate alerts or rings (no duplicates), status, analyst, notes, timestamped audit trail, PDF case report, CSV export.
 - **Model and impact dashboard:** evaluation on future data, rule baseline, unseen-scam test, detection by scam type, fairness check.
 - **Security-operations console UI:** sidebar navigation, live system status, a live threat feed, a Command Center overview and a phone-style customer view.
-- **📚 Datasets page:** Dataset A's two synthetic sets (the main raw log and our earlier customer-profile set, both kept, with downloads), the status of Dataset B, and a cross-dataset test of the demo models on the earlier synthetic set.
+- **Datasets page:** Dataset A's two synthetic sets (the main raw log and our earlier customer-profile set, both kept, with downloads), the status of Dataset B, and a cross-dataset test of the demo models on the earlier synthetic set.
 
 ## 3. Technology stack
 
@@ -79,7 +79,7 @@ No external AI API or paid service is used.
 ## 5. Installation and setup
 
 ```bash
-git clone <https://github.com/YodirHydra/upay-scamshield>
+git clone https://github.com/YodirHydra/upay-scamshield
 cd upay-scamshield
 python -m venv .venv
 # Windows: .venv\Scripts\activate     macOS/Linux: source .venv/bin/activate
@@ -88,7 +88,9 @@ pip install -r requirements.txt
 
 ## 6. Environment variables
 
-None are required. Optional: `SCAMSHIELD_WORKSPACE` chooses the dataset the API runs on: `A` (demo, default) or `B` (your data, after building it).
+None are required. Optional:
+- `SCAMSHIELD_WORKSPACE` chooses the dataset the API runs on: `A` (demo, default) or `B` (your data, after `python workspace.py your_log.csv`).
+- `SCAMSHIELD_SHARED_B=1` makes the app use that same shared Dataset B. By default, on a public server, every browser session gets its **own private Dataset B**, so one visitor's upload is never visible to another; old session uploads are deleted automatically after 12 hours.
 
 ## 7. Run and build commands
 
@@ -111,7 +113,7 @@ The trained models and data are committed, so `streamlit run app.py` works strai
 
 ## 8. Live deployment URL
 
-`<https://upay-scamshield.streamlit.app>`
+https://upay-scamshield.streamlit.app
 
 ## 9. Testing instructions
 
@@ -119,7 +121,7 @@ The trained models and data are committed, so `streamlit run app.py` works strai
 pytest -q
 ```
 
-The 19 tests check, among other things: building Dataset B from an unlabelled log with phone-style IDs and day-first dates; training a new model when labels exist; that no future data leaks into features; that the API's live scoring gives exactly the same features as training; day-first date parsing and data-quality warnings; that the model beats the rule baseline on future data; the anomaly model on an unseen scam type; mule rings without flagging shops; the profile comparison; engine agreement; the case workflow and PDF; and the API's decisions for a normal transfer and a takeover.
+The 20 tests check, among other things: the business impact estimate; building Dataset B from an unlabelled log with phone-style IDs and day-first dates; training a new model when labels exist; that no future data leaks into features; that the API's live scoring gives exactly the same features as training; day-first date parsing and data-quality warnings; that the model beats the rule baseline on future data; the anomaly model on an unseen scam type; mule rings without flagging shops; the profile comparison; engine agreement; the case workflow and PDF; and the API's decisions for a normal transfer and a takeover.
 
 **Pages (sidebar):** Command Center, Send Money, Analyst Queue, Mule Network, Dataset B · Your Data, Datasets, Cases, Model & Impact. The dataset switcher (A or B) is at the top of the sidebar.
 
@@ -171,6 +173,18 @@ Thresholds are in `risk_engine.py` and `mule_network.py`; they are business-poli
 
 **Cross-dataset test (earlier synthetic set).** Scoring our earlier, independently generated set with models trained only on the main log still catches 89% of scams (vs 49% for the simple rule), but false alarms rise to 7.4% because the data looks different. Retraining on that set itself (earlier 70%, tested on the later 30%) brings false alarms down to 3.3% with 91% of scams caught. This is the same thing we expect with real upay data, which is why retraining in shadow mode is the first real-world step.
 
+**Business impact (estimate, per 100,000 send money transfers).** Our test data has far more scams than real life, so we apply the rates measured on future transfers to a realistic number of scams, from the Tk 92.60 crore yearly loss figure and Bangladesh Bank's 134.26 million send money transfers a month ([source](https://thefinancialexpress.com.bd/home/mfs-transactions-maintain-rising-trend-in-oct-25)). Assumptions: all reported losses are send money scams (base) or half of them (cautious); average scam Tk 7,114; a false WARN costs Tk 2; a HOLD costs Tk 20 for the customer plus 10 analyst minutes at Tk 300/hour.
+
+| Per 100,000 transfers | Base | Cautious | Simple rule (base) |
+|---|---|---|---|
+| Alerts | 545 (408 WARN, 138 HOLD) | 542 | 1,176 (all reviewed) |
+| Analyst hours | 23 | 22 | 196 |
+| Money protected | Tk 53,161 | Tk 26,581 | Tk 39,172 |
+| Friction cost | Tk 10,457 | Tk 10,243 | Tk 82,325 |
+| Protected per Tk 1 of friction | 5.1 | 2.6 | 0.5 |
+
+In a stress test (half the losses, half the detection, twice the false alarms) friction would exceed savings, which is why the HOLD threshold is tuned on real data first. The app's Model & Impact page has this calculator with every assumption adjustable (`business.py`).
+
 **Data quality matters.** On a short 15-day log with no wallet opening dates, false alarms rose to about 7%, because with little history many genuine transfers look "new". The app now warns about this automatically.
 
 ## Synthetic data assumptions
@@ -188,7 +202,7 @@ All data is generated by `generate_data.py`; no real customer data or PII is use
 - **Human oversight:** HOLD and ring cases go to an analyst; the user can still confirm a WARN.
 - **Fairness:** measured across new and established customers and reported openly.
 - **Transparency:** the UI and API return the classifier score, anomaly score, rules, engine results and features separately.
-- **Security:** no secrets in the repo; no free-form LLM makes the decision; inputs are validated.
+- **Security:** no secrets in the repo; no free-form LLM makes the decision; inputs are validated; every value that comes from uploaded data or typed notes is HTML-escaped before display and in PDF reports (no injected markup); Dataset B is private per session; uploaded data is never committed (`workspaces/` is git-ignored).
 
 ## Path to production
 
