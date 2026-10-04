@@ -207,3 +207,15 @@ def test_dataset_b_trains_new_model_when_labels_exist():
         assert m["ai_system"]["scam_recall"] > m["rule_baseline"]["scam_recall"]
     finally:
         wsp.delete("TEST")
+
+
+def test_business_impact_estimate():
+    """ScamShield saves more than its friction in the base case and beats the simple rule; stress case is reported honestly."""
+    import business as bz
+    t = pd.read_parquet("data/test_scored.parquet")
+    rates = bz.measured_rates(re_.score_frame(re_.load_model(), re_.load_iforest(), t))
+    base = bz.estimate(rates, avg_scam=rates["avg_scam"])
+    s, r = base["ScamShield"], base["Simple rule"]
+    assert s["net"] > 0 and s["ratio"] > 2 and s["net"] > r["net"] and s["alerts"] < r["alerts"]
+    stress = bz.estimate(rates, avg_scam=rates["avg_scam"], loss_share=0.5, detection_factor=0.5, false_alarm_factor=2)
+    assert stress["ScamShield"]["friction"] > base["ScamShield"]["friction"]
