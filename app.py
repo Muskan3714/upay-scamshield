@@ -6,6 +6,8 @@ import os
 import subprocess
 import sys
 
+import html as _html
+
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -13,6 +15,7 @@ import streamlit as st
 import cases as cs
 import engines as en
 import mule_network as mn
+import business as bz
 import risk_engine as re_
 from icons import ic
 
@@ -114,8 +117,11 @@ code, .mono { font-family: var(--mono) !important; }
 /* phone frame for the customer view */
 .phone { border-radius:34px; padding:12px; background: linear-gradient(160deg,#1a2233,#05080f); border:1px solid #2a3550;
          box-shadow: 0 25px 60px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.04) inset; }
-.phone .notch { width:110px; height:14px; border-radius:0 0 12px 12px; background:#05080f; margin:-12px auto 6px auto; }
-.phone .bar { display:flex; justify-content:space-between; font-family:var(--mono); font-size:.66rem; color:var(--mut); padding:2px 12px 10px 12px; position:relative; z-index:1; }
+.phone .notch { width:110px; height:14px; border-radius:0 0 12px 12px; background:#05080f; margin:-12px auto 2px auto; }
+.phone .bar { display:flex !important; justify-content:space-between; align-items:center; box-sizing:border-box;
+         height:30px !important; min-height:30px; line-height:1.4 !important; font-family:var(--mono); font-size:.68rem;
+         color:var(--mut); padding:0 14px; margin-bottom:6px; overflow:visible; }
+.phone .bar span { display:inline-block !important; line-height:1.4 !important; height:auto !important; white-space:nowrap; }
 .phone .bar b { color: var(--yel); }
 /* decision card */
 .card { border-radius:22px; padding:18px 20px; margin-bottom:6px; position:relative; color: var(--txt); background: var(--panel); }
@@ -186,6 +192,7 @@ section[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) { 
 .section-title .ic { color: var(--blue); margin-right:4px; }
 .card .lvl .ic { vertical-align:-5px; margin-right:6px; }
 .tip .ic { vertical-align:-3px; margin-right:4px; }
+.card .trig { font-family:var(--mono); font-size:.66rem; letter-spacing:1px; color: var(--yel); margin-top:6px; }
 .hero .badge .ic, .sb-badge .ic { vertical-align:middle; }
 .ds { border:1px solid var(--line); border-radius:16px; padding:16px 18px; background: linear-gradient(160deg, var(--panel2), var(--panel)); height:100%; }
 .ds h4 { margin:0 0 4px 0; } .ds .tag { font-family:var(--mono); font-size:.62rem; letter-spacing:1.5px; color: var(--yel); }
@@ -204,12 +211,21 @@ if not all(os.path.exists(p) for p in NEEDED):
 
 import workspace as wsp
 
+# Dataset B is private to each browser session on a public server (one visitor's upload is never shown to another).
+# An organisation running its own server can share one Dataset B built with `python workspace.py log.csv`
+# by setting SCAMSHIELD_SHARED_B=1.
+if "b_name" not in st.session_state:
+    import uuid
+    st.session_state.b_name = "B" if os.environ.get("SCAMSHIELD_SHARED_B") == "1" else f"B_{uuid.uuid4().hex[:10]}"
+    wsp.cleanup(max_age_hours=12)          # remove other sessions' old uploads so the server disk never fills up
+BN = st.session_state.b_name
 if "ws" not in st.session_state:
     st.session_state.ws = "A"
-if st.session_state.ws == "B" and not wsp.exists("B"):
+if st.session_state.ws == "B" and not wsp.exists(BN):
     st.session_state.ws = "A"
 WS = st.session_state.ws
-WP = wsp.paths(WS)
+WSN = "A" if WS == "A" else BN                 # folder name of the active dataset
+WP = wsp.paths(WSN)
 STAMP = os.path.getmtime(WP["metrics"])          # cache key: rebuilding Dataset B refreshes everything
 
 
@@ -245,12 +261,12 @@ def get_network(ws, stamp):
     return wallets, rings, ring_of
 
 
-model, iforest = get_model(WS, STAMP), get_iforest(WS, STAMP)
-hist, STATE = get_history(WS, STAMP)
-wallets, rings, ring_of = get_network(WS, STAMP)
-metrics = wsp.load_metrics(WS)
+model, iforest = get_model(WSN, STAMP), get_iforest(WSN, STAMP)
+hist, STATE = get_history(WSN, STAMP)
+wallets, rings, ring_of = get_network(WSN, STAMP)
+metrics = wsp.load_metrics(WSN)
 _get_test = get_test
-get_test = lambda: _get_test(WS, STAMP)      # every page reads the active dataset's queue
+get_test = lambda: _get_test(WSN, STAMP)      # every page reads the active dataset's queue
 
 
 def customer_ids(h):
@@ -268,6 +284,11 @@ ANALYST = "Fraud analyst (demo)"
 
 
 # ---------------- helpers ----------------
+def E(x):
+    """Escape any text that came from data before it goes into HTML (blocks injected markup in uploaded CSVs)."""
+    return _html.escape(str(x))
+
+
 def engines_html(engs, n_flag):
     cls = "hi" if n_flag >= 3 else "mid" if n_flag >= 1 else "lo"
     h = (f'<div class="eng-head"><span class="t">// ENGINE_CONSENSUS</span>'
@@ -277,7 +298,7 @@ def engines_html(engs, n_flag):
         chip = '<span class="chip2">FLAGGED</span>' if e["flagged"] else '<span class="chip2 off">CLEAR</span>'
         h += (f'<div class="eng {on}">{chip}<div class="nm">{e["name"]}</div><div class="mt">{e["method"]}</div>'
               f'<div class="bar"><div style="width:{max(e["score"], 0.02) * 100:.0f}%"></div></div>'
-              f'<div class="nt">{e["note"]}</div></div>')
+              f'<div class="nt">{E(e["note"])}</div></div>')
     return h + "</div>"
 
 
@@ -286,8 +307,8 @@ def profile_html(rows, name=""):
          '<th>Finding</th></tr>')
     for r in rows:
         stt = '<span class="st u">UNUSUAL</span>' if r["unusual"] else '<span class="st n">NORMAL</span>'
-        h += (f'<tr class="{"u" if r["unusual"] else ""}"><td><b>{r["dimension"]}</b></td><td>{r["baseline"]}</td>'
-              f'<td>{r["this_transfer"]}</td><td>{stt} {r["deviation"]}</td></tr>')
+        h += (f'<tr class="{"u" if r["unusual"] else ""}"><td><b>{E(r["dimension"])}</b></td><td>{E(r["baseline"])}</td>'
+              f'<td>{E(r["this_transfer"])}</td><td>{stt} {E(r["deviation"])}</td></tr>')
     return h + "</table>"
 
 
@@ -360,16 +381,18 @@ def customer_result(row, rec_id, prof_for_table):
         reasons.insert(0, ("network", 1.0, "This wallet has received money from many people in patterns linked to scams.",
                            "এই অ্যাকাউন্টে অনেক সন্দেহজনক লেনদেন এসেছে।"))
     reasons = reasons[:4]
+    drivers = [e["name"] for e in engs if e["flagged"]] + [r_ for r_ in rules if r_ not in ("UNUSUAL_BEHAVIOUR", "KNOWN_MULE_WALLET")]
     icon = {"ALLOW": ic("check-circle", 26), "WARN": ic("alert", 26), "HOLD": ic("stop", 26)}[level]
     head = {"ALLOW": "Looks safe", "WARN": "সাবধান! Possible scam", "HOLD": "Transfer paused for your safety"}[level]
     html = (f'<div class="card {level}"><span class="score">{prob:.0%}<br><small style="font-size:.75rem;font-weight:600">'
-            f'scam risk · unusual {anom:.1%}</small></span><div class="lvl">{icon} {level}</div><div>{head}</div>')
+            f'scam risk · unusual {anom:.1%}</small></span><div class="lvl">{icon} {level}</div><div>{head}</div>'
+            + (f'<div class="trig">TRIGGERED BY: {" · ".join(d.upper() for d in drivers)}</div>' if level != "ALLOW" and drivers else ""))
     if level == "ALLOW":
         html += f'<div style="margin-top:8px">{re_.ACTIONS["ALLOW"][1]}<br><small>{re_.ACTIONS["ALLOW"][0]}</small></div>'
     else:
         html += '<div style="margin-top:10px;font-weight:700">কেন / Why:</div>'
         for _, _, en_txt, bn in reasons:
-            html += f'<div class="reason">{bn}<br><small>{en_txt}</small></div>'
+            html += f'<div class="reason">{E(bn)}<br><small>{E(en_txt)}</small></div>'
         html += f'<div class="tip">{ic("lock", 16)} {re_.SAFETY_TIP[1]}</div>'
         html += f'<div style="margin-top:10px"><b>Action:</b> {re_.ACTIONS[level][0]}</div>'
     phone = ('<div class="phone"><div class="notch"></div><div class="bar"><span><b>upay</b> · Send Money</span>'
@@ -399,10 +422,10 @@ _alerts = _test_for_ticker[_test_for_ticker.risk_score >= re_.WARN_THRESHOLD].he
 _items = []
 for _r in _alerts.itertuples():
     _lvl = "HOLD" if _r.risk_score >= re_.HOLD_THRESHOLD else "WARN"
-    _items.append(f'<span class="{"h" if _lvl == "HOLD" else "w"}">▲ {_lvl}</span> <b>{_r.txn_id}</b> '
-                  f'৳{_r.amount:,.0f} → {_r.recipient_id} · risk {_r.risk_score:.0%} · {_r.district}')
+    _items.append(f'<span class="{"h" if _lvl == "HOLD" else "w"}">▲ {_lvl}</span> <b>{E(_r.txn_id)}</b> '
+                  f'৳{_r.amount:,.0f} → {E(_r.recipient_id)} · risk {_r.risk_score:.0%} · {E(_r.district)}')
 for _rg in rings[:6]:
-    _items.append(f'<span class="h">◆ RING</span> <b>{_rg["ring_id"]}</b> {_rg["n_mules"]} mule wallets → collector {_rg["collector"]}')
+    _items.append(f'<span class="h">◆ RING</span> <b>{_rg["ring_id"]}</b> {_rg["n_mules"]} mule wallets → collector {E(_rg["collector"])}')
 _feed = " &nbsp;&nbsp;│&nbsp;&nbsp; ".join(_items)
 _n_cust = int(customer_ids(hist).nunique())
 _n_alerts = int((_test_for_ticker.risk_score >= re_.WARN_THRESHOLD).sum())
@@ -435,10 +458,10 @@ with st.sidebar:
     st.markdown("""<div class="sb-logo"><div class="sb-badge">""" + ic("shield-check", 22, "#06306B", 2.4) + """</div><div><div class="sb-t">upay <span>ScamShield</span></div>
     <div class="sb-s">TRUST &amp; RISK OPS CONSOLE</div></div></div>""", unsafe_allow_html=True)
     st.markdown('<div class="sb-h" style="margin-top:4px">ACTIVE DATASET</div>', unsafe_allow_html=True)
-    ds_opts = ["A · Demo (synthetic)"] + (["B · Your data"] if wsp.exists("B") else [])
+    ds_opts = ["A · Demo (synthetic)"] + (["B · Your data"] if wsp.exists(BN) else [])
     st.radio("Dataset", ds_opts, index=1 if WS == "B" and len(ds_opts) > 1 else 0, label_visibility="collapsed",
              key="ds_pick", on_change=lambda: st.session_state.update(ws=st.session_state.ds_pick[0]))
-    if not wsp.exists("B"):
+    if not wsp.exists(BN):
         st.caption("Dataset B not built yet: load your own log in the Dataset B page.")
     st.markdown('<div class="sb-h" style="margin-top:10px">NAVIGATION</div>', unsafe_allow_html=True)
     page = st.radio("Navigation", PAGES, label_visibility="collapsed", key="nav")
@@ -462,6 +485,77 @@ with st.sidebar:
 </div>
 <div class="sb-foot">Synthetic data · decision support only<br>HOLD = pause &amp; re-verify, never auto-block</div>
 """, unsafe_allow_html=True)
+
+# ---------------- Business impact (shared by Command Center and Model & Impact) ----------------
+@st.cache_data(show_spinner=False)
+def impact_rates(wsn, stamp):
+    """Measured rates on the active dataset's labelled future test set; falls back to Dataset A when there are no labels."""
+    t = pd.read_parquet(wsp.paths(wsn)["test"])
+    if "is_fraud" in t and t.is_fraud.notna().sum() > 0 and t.is_fraud.sum() >= 5:
+        lab = t[t.is_fraud.notna()]
+        return bz.measured_rates(re_.score_frame(model, iforest, lab)), wsn
+    tA = pd.read_parquet(wsp.paths("A")["test"])
+    mA, fA = re_.load_model(wsp.paths("A")["model"]), re_.load_iforest(wsp.paths("A")["iforest"])
+    return bz.measured_rates(re_.score_frame(mA, fA, tA)), "A"
+
+
+PRESETS_BIZ = {"Base": dict(loss_share=1.0, detection_factor=1.0, false_alarm_factor=1.0),
+               "Cautious": dict(loss_share=0.5, detection_factor=1.0, false_alarm_factor=1.0),
+               "Stress test": dict(loss_share=0.5, detection_factor=0.5, false_alarm_factor=2.0)}
+
+
+def tk(x):
+    return f"-Tk {abs(x):,.0f}" if x < 0 else f"Tk {x:,.0f}"
+
+
+def business_impact_ui():
+    rates, src = impact_rates(WSN, STAMP)
+    st.markdown(f'<div class="section-title">{ic("wallet", 16)} Business impact per 100,000 send money transfers</div>',
+                unsafe_allow_html=True)
+    st.caption("Our test data has far more scams (1.9%) than real life, so its alert counts are not used directly. We take the "
+               "rates the system achieved on future transfers and apply them to a realistic number of scams, from the reported "
+               "loss of Tk 92.60 crore a year and Bangladesh Bank's 134.26 million send money transfers a month. "
+               + ("Rates measured on your Dataset B." if src != "A" else "Rates measured on Dataset A (demo)."))
+    preset = st.radio("Scenario", list(PRESETS_BIZ) + ["Custom"], horizontal=True, key="biz_preset")
+    p = dict(PRESETS_BIZ.get(preset, PRESETS_BIZ["Base"]))
+    with st.expander("Assumptions (change them to test the estimate)", expanded=preset == "Custom", icon=":material/tune:"):
+        a1, a2, a3 = st.columns(3)
+        loss_share = a1.slider("Share of reported losses from send money scams", 0.1, 1.0, p["loss_share"], 0.05,
+                               disabled=preset != "Custom", help="100% is an upper bound: the figure also covers cards and banks")
+        det = a2.slider("Real detection vs. our test", 0.25, 1.0, p["detection_factor"], 0.05, disabled=preset != "Custom",
+                        help="1.0 = as good as on our future test data")
+        fa = a3.slider("Real false alarms vs. our test", 1.0, 4.0, p["false_alarm_factor"], 0.25, disabled=preset != "Custom")
+        b1, b2, b3, b4 = st.columns(4)
+        avg_scam = b1.number_input("Average scam transfer (Tk)", 500, 50000, int(round(rates["avg_scam"])), 100)
+        warn_cost = b2.number_input("Cost of a false WARN (Tk)", 0, 50, 2)
+        hold_cost = b3.number_input("Customer cost of a HOLD (Tk)", 0, 500, 20)
+        minutes = b4.number_input("Analyst minutes per HOLD", 1, 60, 10)
+        rate = st.number_input("Analyst cost per hour (Tk)", 50, 2000, 300, 50)
+    e = bz.estimate(rates, loss_share=loss_share, avg_scam=avg_scam, warn_cost=warn_cost, hold_customer_cost=hold_cost,
+                    analyst_minutes=minutes, analyst_rate=rate, detection_factor=det, false_alarm_factor=fa)
+    s, r = e["ScamShield"], e["Simple rule"]
+    net_cls = "" if s["net"] >= 0 else ' style="color:var(--bad)"'
+    st.markdown(f"""<div class="kpis">
+<div class="kpi"><div class="k">MONEY PROTECTED</div><div class="v">{tk(s["protected"])}</div><div class="s">● scams stopped before payout</div></div>
+<div class="kpi"><div class="k">FRICTION COST</div><div class="v">{tk(s["friction"])}</div><div class="s">● false alarms + HOLD reviews</div></div>
+<div class="kpi"><div class="k">NET BENEFIT</div><div class="v"{net_cls}>{tk(s["net"])}</div><div class="s">● {s["ratio"]:.1f}x protected per Tk 1 of friction</div></div>
+<div class="kpi"><div class="k">ALERTS</div><div class="v">{s["alerts"]:,.0f}</div><div class="s">● {s["warn"]:,.0f} WARN · {s["hold"]:,.0f} HOLD</div></div>
+<div class="kpi"><div class="k">ANALYST HOURS</div><div class="v">{s["analyst_hours"]:,.1f}</div><div class="s">● {s["analyst_hours"] * 10 / 160:.1f} analysts per 1M transfers</div></div>
+</div>""", unsafe_allow_html=True)
+    st.dataframe(pd.DataFrame({
+        "ScamShield": [f"{s['scams']:.1f}", f"{s['alerts']:,.0f}", f"{s['warn']:,.0f}", f"{s['hold']:,.0f}", f"{s['analyst_hours']:,.1f}",
+                       tk(s["protected"]), tk(s["friction"]), tk(s["net"]), f"{s['ratio']:.1f}"],
+        "Simple rule (no WARN step, every alert reviewed)": [f"{r['scams']:.1f}", f"{r['alerts']:,.0f}", "n/a", f"{r['hold']:,.0f}",
+                       f"{r['analyst_hours']:,.1f}", tk(r["protected"]), tk(r["friction"]), tk(r["net"]), f"{r['ratio']:.1f}"]},
+        index=["Scam transfers", "Alerts in total", "WARN (customer decides)", "HOLD (analyst review)", "Analyst hours",
+               "Money protected", "Friction cost", "Net benefit", "Protected per Tk 1 of friction"]), width="stretch")
+    st.caption(f"Per 1 million transfers, multiply by 10: {tk(s['protected'] * 10)} protected for {tk(s['friction'] * 10)} of friction. "
+               "Friction = false WARNs × WARN cost + every HOLD × (customer cost + analyst time). Not counted: customer trust, "
+               "fewer complaints and disputes, rings stopped before more victims, regulatory value. These are estimates from "
+               "stated assumptions, not measured savings.")
+    if s["net"] < 0:
+        st.warning("In this scenario friction costs more than it saves. The lever is the HOLD threshold: tune it on real data in "
+                   "shadow mode so only the strongest cases reach an analyst.")
 
 # ---------------- Command Center ----------------
 if page.endswith("Command Center"):
@@ -499,6 +593,12 @@ if page.endswith("Command Center"):
                        "of genuine transfers warned, on transfers the models never saw.")
         else:
             st.caption("No fraud labels in this dataset, so accuracy cannot be measured; decisions are shown for all transfers.")
+        _r, _ = impact_rates(WSN, STAMP)
+        _e = bz.estimate(_r, avg_scam=_r["avg_scam"])["ScamShield"]
+        st.markdown(f'<div class="casebox">{ic("wallet", 16)} <b>Business impact (base case, per 100,000 transfers):</b> '
+                    f'Tk {_e["protected"]:,.0f} protected for Tk {_e["friction"]:,.0f} of friction, '
+                    f'<b>{_e["ratio"]:.1f}x</b>, with {_e["analyst_hours"]:.0f} analyst hours. Details in Model &amp; Impact.</div>',
+                    unsafe_allow_html=True)
     with c2:
         st.markdown('<div class="section-title">Latest high-risk transfers</div>', unsafe_allow_html=True)
         lt = tdec[tdec.decision == "HOLD"].sort_values("timestamp", ascending=False).head(10)
@@ -525,8 +625,8 @@ if page.endswith("Send Money"):
             now = hist.timestamp.max() + pd.Timedelta(hours=1)
             prof = pl.customer_profile(hist, cust, now)
             mine = hist[hist.sender_id == cust]
-            st.markdown(f'<div class="casebox"><b>{cust}</b> · {prof["history"]} past transfers · usual ৳{prof["usual_amount"]:,.0f} · '
-                        f'active {prof["active_start"]:02d}:00 to {prof["active_end"]:02d}:00 · {prof["home_district"]} · '
+            st.markdown(f'<div class="casebox"><b>{E(cust)}</b> · {prof["history"]} past transfers · usual ৳{prof["usual_amount"]:,.0f} · '
+                        f'active {prof["active_start"]:02d}:00 to {prof["active_end"]:02d}:00 · {E(prof["home_district"])} · '
                         f'{prof["known_recipients"]} contacts</div>', unsafe_allow_html=True)
             amount = st.number_input("Amount (৳)", 10, 25000, int(round(prof["usual_amount"], -1)), step=100)
             contacts = list(mine.receiver_id.value_counts().index[:5])
@@ -540,10 +640,13 @@ if page.endswith("Send Money"):
             dists = [prof["home_district"]] + [d for d in sorted(set(hist.district)) if d != prof["home_district"]]
             dist = st.selectbox("District", dists)
             c1, c2 = st.columns(2)
-            day = c1.date_input("Date", now.date())
+            day = c1.date_input("Date", now.date(), min_value=now.date())
             hour = c2.slider("Hour", 0, 23, 14)
             call = st.checkbox("Customer is on a phone call while sending")
             ts = pd.Timestamp(day) + pd.Timedelta(hours=hour)
+            if ts <= hist.timestamp.max():       # a new transfer must come after the history (no peeking at the future)
+                ts = hist.timestamp.max() + pd.Timedelta(minutes=1)
+                st.caption(f"Time moved to {ts:%d %b %Y %H:%M}, just after the last transfer in the history.")
         f = STATE.peek(ts, cust, rec_id, amount, dev, dist, int(call))
         row = pd.Series({**f, "device_id": dev, "district": dist})
         with right:
@@ -673,12 +776,12 @@ if page.endswith("Your Data"):
                 "fits a **new anomaly model on your data**, and, if the log has confirmed fraud labels (`is_fraud`), "
                 "**trains a new scam classifier** on the earlier 70% and tests it on the later 30%. The result is saved as "
                 "**Dataset B**; switch to it in the sidebar and every page, plus the API, runs on your data.")
-    if wsp.exists("B"):
-        mb = wsp.load_metrics("B")
+    if wsp.exists(BN):
+        mb = wsp.load_metrics(BN)
         st.success(f"Dataset B is ready: {mb['rows']:,} transfers, {mb['senders']:,} senders, {mb['days']} days · "
                    + ("classifier trained on your labels" if mb["mode"] == "trained" else "demo classifier (no usable labels)")
                    + (" · **active now**" if WS == "B" else " · switch to it in the sidebar"))
-    with st.expander("Required format", expanded=not wsp.exists("B"), icon=":material/table_view:"):
+    with st.expander("Required format", expanded=not wsp.exists(BN), icon=":material/table_view:"):
         st.dataframe(pd.DataFrame([
             ("txn_id", "required", "Unique transfer ID", "T000123"),
             ("timestamp", "required", "Date and time", "2026-07-01 14:30:00 or 01/07/2026 14:30"),
@@ -727,7 +830,7 @@ if page.endswith("Your Data"):
             if st.button("Build Dataset B from this log", type="primary", icon=":material/model_training:"):
                 box = st.status("> BUILDING_DATASET_B ...", expanded=True)
                 try:
-                    mb = wsp.build_b(raw_u, "B", progress=lambda m_: box.write(m_))
+                    mb = wsp.build_b(raw_u, BN, progress=lambda m_: box.write(m_))
                     box.update(label="> DATASET_B_READY", state="complete")
                     st.session_state.ws = "B"
                     st.session_state.pop("ds_pick", None)
@@ -736,8 +839,8 @@ if page.endswith("Your Data"):
                 except Exception as ex:          # show the problem instead of crashing
                     box.update(label="> BUILD_FAILED", state="error")
                     st.error(f"Could not build Dataset B: {ex}")
-    if wsp.exists("B"):
-        mb = wsp.load_metrics("B")
+    if wsp.exists(BN):
+        mb = wsp.load_metrics(BN)
         st.markdown('<div class="section-title" style="margin-top:16px">Dataset B results</div>', unsafe_allow_html=True)
         st.write(mb["note"])
         st.caption(mb["split"])
@@ -753,7 +856,7 @@ if page.endswith("Your Data"):
             st.session_state.pop("ds_pick", None)
             st.rerun()
         if c2.button("Delete Dataset B", icon=":material/delete:"):
-            wsp.delete("B")
+            wsp.delete(BN)
             st.session_state.ws = "A"
             st.session_state.pop("ds_pick", None)
             st.cache_data.clear()
@@ -794,8 +897,8 @@ if page.endswith("Datasets"):
     st.markdown('<div class="section-title">Datasets</div>', unsafe_allow_html=True)
     st.caption("Dataset A is our synthetic demo data (the main raw log plus our earlier synthetic set, both kept). "
                "Dataset B is your own data: load it in the Dataset B page and ScamShield builds real models from it.")
-    if wsp.exists("B"):
-        mb = wsp.load_metrics("B")
+    if wsp.exists(BN):
+        mb = wsp.load_metrics(BN)
         st.markdown(f"""<div class="ds" style="margin-bottom:12px"><div class="tag">DATASET B · YOUR DATA · {"ACTIVE" if WS == "B" else "READY"}</div>
 <h4>Your transaction log</h4><p><b>{mb['rows']:,}</b> transfers · <b>{mb['senders']:,}</b> senders · <b>{mb['days']}</b> days ·
 {"classifier trained on your labels" if mb['mode'] == "trained" else "demo classifier, anomaly model fitted on your data"}</p>
@@ -876,8 +979,8 @@ if page.endswith("Cases"):
             d1, d2 = st.columns([1.2, 1])
             with d1:
                 st.markdown(f'<div class="casebox"><b>{case["id"]}</b> &nbsp; <span class="pri {case["priority"]}">'
-                            f'{case["priority"]}</span><br>{case["title"]}<br><small>Status: <b>{case["status"]}</b> · '
-                            f'Analyst: {case["analyst"]} · Created {case["created"]}</small></div>', unsafe_allow_html=True)
+                            f'{case["priority"]}</span><br>{E(case["title"])}<br><small>Status: <b>{case["status"]}</b> · '
+                            f'Analyst: {E(case["analyst"])} · Created {case["created"]}</small></div>', unsafe_allow_html=True)
                 ev = case["evidence"]
                 st.markdown(f"**What happened:** {ev['what']}")
                 st.markdown("**Why it is risky:**\n" + "\n".join(f"- {w}" for w in ev["why"]))
@@ -909,6 +1012,10 @@ if page.endswith("Cases"):
                            file_name="scamshield_cases.csv", mime="text/csv")
 
 # ---------------- Model & impact ----------------
+if page.endswith("Model & Impact"):
+    business_impact_ui()
+    st.divider()
+
 if page.endswith("Model & Impact") and WS == "B":
     st.markdown(f'<div class="section-title">{ic("chart", 16)} Dataset B · your data</div>', unsafe_allow_html=True)
     st.write(metrics["note"])
